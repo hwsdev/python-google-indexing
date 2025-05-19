@@ -6,6 +6,7 @@ A Python tool for submitting URLs to Google's Indexing API with support for mult
 
 - Submit URLs to Google's Indexing API
 - Support for multiple Google API keys
+- Process XML sitemaps to automatically extract and add URLs
 - Automatic scheduling using cron or built-in scheduler
 - Command-line interface for managing URLs and API keys
 - Detailed logging of successes and errors
@@ -57,6 +58,11 @@ Add a single URL:
 python indexing_cli.py url add https://example.com/new-page
 ```
 
+Add URLs from a sitemap:
+```
+python indexing_cli.py url add-from-sitemap https://example.com/sitemap.xml
+```
+
 Add multiple URLs from a file (one URL per line):
 ```
 python indexing_cli.py url add-from-file urls.txt
@@ -90,7 +96,7 @@ For more reliable scheduling, you can use cron:
 
 ```
 # Run the indexing tool every hour
-0 * * * * cd /path/to/google-indexing-tool && python indexing_scheduler.py --run-once
+0 * * * * cd /path/to/python-google-indexing && python indexing_scheduler.py --run-once
 ```
 
 ## Configuration Options

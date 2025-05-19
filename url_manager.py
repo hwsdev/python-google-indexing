@@ -1,7 +1,10 @@
 import os
 import json
 import logging
+import requests
+from bs4 import BeautifulSoup
 from typing import List, Dict, Any, Optional
+from urllib.parse import urljoin
 
 logger = logging.getLogger("url_manager")
 
@@ -91,6 +94,68 @@ class URLManager:
                 count += 1
                 
         return count
+        
+    def add_sitemap(self, sitemap_url: str, priority: int = 1) -> int:
+        """
+        Parse a sitemap and add all contained URLs for indexing
+        
+        Args:
+            sitemap_url: URL of the sitemap
+            priority: Priority level for all URLs
+            
+        Returns:
+            Number of URLs added successfully
+        """
+        logger.info(f"Fetching sitemap from {sitemap_url}")
+        try:
+            # Fetch the sitemap
+            response = requests.get(sitemap_url, timeout=30)
+            response.raise_for_status()
+            
+            # Parse the XML
+            soup = BeautifulSoup(response.content, 'xml')
+            
+            # First check if this is a sitemap index
+            sitemap_tags = soup.find_all('sitemap')
+            if sitemap_tags:
+                logger.info(f"Found sitemap index with {len(sitemap_tags)} sitemaps")
+                urls_added = 0
+                
+                # Process each child sitemap
+                for sitemap_tag in sitemap_tags:
+                    loc = sitemap_tag.find('loc')
+                    if loc and loc.text:
+                        child_sitemap_url = loc.text
+                        urls_added += self.add_sitemap(child_sitemap_url, priority)
+                        
+                return urls_added
+            
+            # Extract URLs from the sitemap
+            url_tags = soup.find_all('url')
+            if not url_tags:
+                logger.warning(f"No URLs found in sitemap: {sitemap_url}")
+                return 0
+                
+            logger.info(f"Found {len(url_tags)} URLs in sitemap")
+            
+            # Extract and add each URL
+            urls_to_add = []
+            for url_tag in url_tags:
+                loc = url_tag.find('loc')
+                if loc and loc.text:
+                    urls_to_add.append(loc.text.strip())
+            
+            # Add all URLs
+            count = self.add_urls(urls_to_add, priority)
+            logger.info(f"Added {count} URLs from sitemap {sitemap_url}")
+            return count
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching sitemap {sitemap_url}: {str(e)}")
+            return 0
+        except Exception as e:
+            logger.error(f"Error processing sitemap {sitemap_url}: {str(e)}")
+            return 0
         
     def get_pending_urls(self, limit: Optional[int] = None, priority_threshold: Optional[int] = None) -> List[str]:
         """

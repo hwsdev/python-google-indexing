@@ -64,6 +64,12 @@ class IndexingCLI:
         except Exception as e:
             print(f"Error reading URLs from file: {str(e)}")
             
+    def add_urls_from_sitemap(self, sitemap_url: str, priority: int = 1):
+        """Add URLs from a sitemap"""
+        print(f"Fetching sitemap from {sitemap_url}...")
+        count = self.url_manager.add_sitemap(sitemap_url, priority)
+        print(f"Added {count} URLs from sitemap {sitemap_url}")
+            
     def list_urls(self, status: Optional[str] = None):
         """List URLs with optional status filter"""
         urls = self.url_manager.urls
@@ -162,6 +168,11 @@ def parse_arguments():
     add_urls_parser.add_argument("file", help="File containing URLs (one per line)")
     add_urls_parser.add_argument("--priority", type=int, default=1, help="Priority level for all URLs")
     
+    # Add URLs from sitemap
+    add_sitemap_parser = url_subparsers.add_parser("add-from-sitemap", help="Add URLs from a sitemap")
+    add_sitemap_parser.add_argument("sitemap", help="URL of the sitemap")
+    add_sitemap_parser.add_argument("--priority", type=int, default=1, help="Priority level for all URLs")
+    
     # List URLs
     list_urls_parser = url_subparsers.add_parser("list", help="List URLs")
     list_urls_parser.add_argument("--status", choices=["pending", "indexed", "failed"], help="Filter by status")
@@ -208,6 +219,8 @@ def main():
             cli.add_url(args.url, args.priority)
         elif args.url_command == "add-from-file":
             cli.add_urls_from_file(args.file, args.priority)
+        elif args.url_command == "add-from-sitemap":
+            cli.add_urls_from_sitemap(args.sitemap, args.priority)
         elif args.url_command == "list":
             cli.list_urls(args.status)
         else:
