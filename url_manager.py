@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import requests
-from bs4 import BeautifulSoup
+import lxml.etree
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin
 
@@ -108,30 +108,42 @@ class URLManager:
         """
         logger.info(f"Fetching sitemap from {sitemap_url}")
         try:
-            # Fetch the sitemap
-            response = requests.get(sitemap_url, timeout=30)
+            # Fetch the sitemap with a more robust request
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = requests.get(sitemap_url, headers=headers, timeout=60)
             response.raise_for_status()
             
-            # Parse the XML
-            soup = BeautifulSoup(response.content, 'xml')
+            # Parse the XML using lxml
+            try:
+                tree = lxml.etree.fromstring(response.content)
+            except lxml.etree.XMLSyntaxError as xml_err:
+                logger.error(f"XML Syntax Error parsing sitemap {sitemap_url}: {str(xml_err)}")
+                return 0
             
-            # First check if this is a sitemap index
-            sitemap_tags = soup.find_all('sitemap')
+            # Namespace handling
+            namespaces = {
+                'sitemap': 'http://www.sitemaps.org/schemas/sitemap/0.9',
+                'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'
+            }
+            
+            # Check if this is a sitemap index
+            sitemap_tags = tree.xpath('//sitemap:sitemap/sitemap:loc', namespaces=namespaces)
             if sitemap_tags:
                 logger.info(f"Found sitemap index with {len(sitemap_tags)} sitemaps")
                 urls_added = 0
                 
                 # Process each child sitemap
                 for sitemap_tag in sitemap_tags:
-                    loc = sitemap_tag.find('loc')
-                    if loc and loc.text:
-                        child_sitemap_url = loc.text
+                    child_sitemap_url = sitemap_tag.text
+                    if child_sitemap_url:
                         urls_added += self.add_sitemap(child_sitemap_url, priority)
                         
                 return urls_added
             
             # Extract URLs from the sitemap
-            url_tags = soup.find_all('url')
+            url_tags = tree.xpath('//sitemap:url/sitemap:loc', namespaces=namespaces)
             if not url_tags:
                 logger.warning(f"No URLs found in sitemap: {sitemap_url}")
                 return 0
@@ -139,11 +151,7 @@ class URLManager:
             logger.info(f"Found {len(url_tags)} URLs in sitemap")
             
             # Extract and add each URL
-            urls_to_add = []
-            for url_tag in url_tags:
-                loc = url_tag.find('loc')
-                if loc and loc.text:
-                    urls_to_add.append(loc.text.strip())
+            urls_to_add = [url_tag.text.strip() for url_tag in url_tags if url_tag.text]
             
             # Add all URLs
             count = self.add_urls(urls_to_add, priority)
