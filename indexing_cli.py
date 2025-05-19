@@ -118,6 +118,34 @@ class IndexingCLI:
             print(f"{i}. {key}")
             
         print(f"\nTotal: {len(keys)} API keys")
+
+    def key_status(self):
+        """Show status of all API keys"""
+        status_list = self.indexing_manager.get_key_status()
+        
+        if not status_list:
+            print("No API keys available")
+            return
+            
+        print(f"{'Key File':<40} {'Email':<40} {'Status':<10}")
+        print("-" * 90)
+        
+        for key in status_list:
+            status = "Active" if key["active"] else "Inactive (Quota limit)"
+            file_name = os.path.basename(key["file"])
+            print(f"{file_name:<40} {key['email']:<40} {status:<10}")
+            if not key["active"] and key["last_error"]:
+                print(f"    Last error: {key['last_error']}")
+                
+        print(f"\nTotal: {len(status_list)} API keys, {sum(1 for k in status_list if k['active'])} active")
+        
+    def activate_key(self, key_file: str):
+        """Reactivate a key that was disabled due to quota limits"""
+        success = self.indexing_manager.activate_key(key_file)
+        if success:
+            print(f"Successfully reactivated key: {key_file}")
+        else:
+            print(f"Failed to reactivate key: {key_file}")
         
     def test_api_key(self, key_file: Optional[str] = None):
         """Test a specific API key or all keys"""
@@ -134,6 +162,7 @@ class IndexingCLI:
                 api = GoogleIndexingAPI(file_path)
                 print(f"API key is valid: {file_path}")
                 print(f"Service account email: {api._credentials.service_account_email}")
+                print(f"Status: {'Active' if api.is_active else 'Inactive (Quota limit)'}")
             except Exception as e:
                 print(f"Error testing API key {file_path}: {str(e)}")
         else:
@@ -144,9 +173,12 @@ class IndexingCLI:
                 
             print("Testing all API keys:")
             for i, client in enumerate(self.indexing_manager.api_clients, 1):
-                print(f"{i}. {client.service_account_file} - Valid (Email: {client._credentials.service_account_email})")
+                status = "Active" if client.is_active else "Inactive (Quota limit)"
+                print(f"{i}. {os.path.basename(client.service_account_file)} - {status} (Email: {client._credentials.service_account_email})")
+                if not client.is_active and client.last_error:
+                    print(f"    Last error: {client.last_error}")
                 
-            print(f"\nTotal: {len(self.indexing_manager.api_clients)} valid API keys")
+            print(f"\nTotal: {len(self.indexing_manager.api_clients)} API keys, {sum(1 for c in self.indexing_manager.api_clients if c.is_active)} active")
 
 
 def parse_arguments():
@@ -187,6 +219,13 @@ def parse_arguments():
     
     # List API keys
     key_subparsers.add_parser("list", help="List available API keys")
+    
+    # Key status
+    key_subparsers.add_parser("status", help="Show status of all API keys including quota limit information")
+    
+    # Activate key
+    activate_key_parser = key_subparsers.add_parser("activate", help="Reactivate a key that was disabled due to quota limits")
+    activate_key_parser.add_argument("file", help="Key file to reactivate")
     
     # Test API key
     test_key_parser = key_subparsers.add_parser("test", help="Test API key(s)")
@@ -232,6 +271,10 @@ def main():
             cli.add_api_key(args.file)
         elif args.key_command == "list":
             cli.list_api_keys()
+        elif args.key_command == "status":
+            cli.key_status()
+        elif args.key_command == "activate":
+            cli.activate_key(args.file)
         elif args.key_command == "test":
             cli.test_api_key(args.file)
         else:

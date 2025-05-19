@@ -35,6 +35,9 @@ class GoogleIndexingAPI:
         self.service_account_file = service_account_file
         self._service = None
         self._credentials = None
+        self.is_active = True
+        self.quota_error_count = 0
+        self.last_error = None
         self._initialize_service()
         
     def _initialize_service(self):
@@ -48,7 +51,31 @@ class GoogleIndexingAPI:
             logger.info(f"Successfully initialized service with account: {self._credentials.service_account_email}")
         except Exception as e:
             logger.error(f"Failed to initialize service: {str(e)}")
+            self.is_active = False
+            self.last_error = str(e)
             raise
+            
+    def _check_quota_error(self, error):
+        """Check if the error is related to quota limits"""
+        quota_error_messages = [
+            "Quota exceeded",
+            "userRateLimitExceeded",
+            "quotaExceeded",
+            "rateLimitExceeded",
+            "Rate Limit Exceeded",
+            "Daily Limit Exceeded"
+        ]
+        
+        error_str = str(error).lower()
+        for msg in quota_error_messages:
+            if msg.lower() in error_str:
+                self.quota_error_count += 1
+                # If we've seen multiple quota errors in a row, deactivate the key
+                if self.quota_error_count >= 3:
+                    self.is_active = False
+                    logger.warning(f"Deactivating key {self.service_account_file} due to quota limits")
+                return True
+        return False
     
     def request_indexing(self, url: str, action: str = "URL_UPDATED") -> Dict[str, Any]:
         """
@@ -61,6 +88,10 @@ class GoogleIndexingAPI:
         Returns:
             API response as dictionary
         """
+        if not self.is_active:
+            logger.warning(f"Skipping indexing for {url} - API key is inactive due to quota limits")
+            return {"error": "API key inactive due to quota limits", "details": {"lastError": self.last_error}}
+        
         if action not in ["URL_UPDATED", "URL_DELETED"]:
             raise ValueError("Action must be either URL_UPDATED or URL_DELETED")
             
@@ -71,11 +102,21 @@ class GoogleIndexingAPI:
                     "type": action
                 }
             ).execute()
+            # Reset quota error count on successful call
+            self.quota_error_count = 0
             logger.info(f"Successfully submitted {url} for {action}")
             return response
         except HttpError as e:
             error_details = json.loads(e.content.decode())
-            logger.error(f"Error submitting {url}: {error_details.get('error', {}).get('message', str(e))}")
+            error_message = error_details.get('error', {}).get('message', str(e))
+            
+            # Check if this is a quota limit error
+            if self._check_quota_error(error_message):
+                logger.error(f"Quota limit error for key {self.service_account_file}: {error_message}")
+                self.last_error = error_message
+            else:
+                logger.error(f"Error submitting {url}: {error_message}")
+                
             return {"error": str(e), "details": error_details}
         except Exception as e:
             logger.error(f"Unexpected error submitting {url}: {str(e)}")
@@ -91,6 +132,10 @@ class GoogleIndexingAPI:
         Returns:
             Status information as dictionary
         """
+        if not self.is_active:
+            logger.warning(f"Skipping status check for {url} - API key is inactive due to quota limits")
+            return {"error": "API key inactive due to quota limits", "details": {"lastError": self.last_error}}
+            
         try:
             params = {
                 'url': url,
@@ -99,11 +144,21 @@ class GoogleIndexingAPI:
             response = self._service.urlNotifications().getMetadata(
                 **params
             ).execute()
+            # Reset quota error count on successful call
+            self.quota_error_count = 0
             logger.info(f"Got status for {url}")
             return response
         except HttpError as e:
             error_details = json.loads(e.content.decode())
-            logger.error(f"Error getting status for {url}: {error_details.get('error', {}).get('message', str(e))}")
+            error_message = error_details.get('error', {}).get('message', str(e))
+            
+            # Check if this is a quota limit error
+            if self._check_quota_error(error_message):
+                logger.error(f"Quota limit error for key {self.service_account_file}: {error_message}")
+                self.last_error = error_message
+            else:
+                logger.error(f"Error getting status for {url}: {error_message}")
+                
             return {"error": str(e), "details": error_details}
         except Exception as e:
             logger.error(f"Unexpected error getting status for {url}: {str(e)}")
@@ -185,9 +240,53 @@ class IndexingManager:
             logger.error("No API clients available")
             return None
             
-        client = self.api_clients[self.current_key_index]
-        self.current_key_index = (self.current_key_index + 1) % len(self.api_clients)
-        return client
+        # Count active clients
+        active_clients = [client for client in self.api_clients if client.is_active]
+        if not active_clients:
+            logger.error("No active API clients available - all have reached quota limits")
+            return None
+            
+        # Start from current index and find the next active client
+        start_idx = self.current_key_index
+        for _ in range(len(self.api_clients)):
+            client = self.api_clients[self.current_key_index]
+            # Move to the next client for the next call
+            self.current_key_index = (self.current_key_index + 1) % len(self.api_clients)
+            
+            # If client is active, use it
+            if client.is_active:
+                return client
+                
+            # If we've checked all clients and come back to the start, break
+            if self.current_key_index == start_idx:
+                break
+                
+        # If we get here, no active clients were found
+        return None
+    
+    def get_key_status(self) -> List[Dict[str, Any]]:
+        """Get status of all API keys"""
+        status = []
+        for client in self.api_clients:
+            key_info = {
+                "file": client.service_account_file,
+                "email": client._credentials.service_account_email if client._credentials else "Unknown",
+                "active": client.is_active,
+                "last_error": client.last_error
+            }
+            status.append(key_info)
+        return status
+    
+    def activate_key(self, key_file: str) -> bool:
+        """Reactivate a disabled key"""
+        for client in self.api_clients:
+            if client.service_account_file == key_file or os.path.basename(client.service_account_file) == key_file:
+                client.is_active = True
+                client.quota_error_count = 0
+                logger.info(f"Reactivated key: {key_file}")
+                return True
+        logger.warning(f"Key not found for activation: {key_file}")
+        return False
     
     def index_url(self, url: str, action: str = "URL_UPDATED") -> Dict[str, Any]:
         """
@@ -202,7 +301,9 @@ class IndexingManager:
         """
         client = self._get_next_client()
         if not client:
-            return {"error": "No API clients available"}
+            error_msg = "No active API clients available"
+            logger.error(error_msg)
+            return {"error": error_msg}
         
         response = client.request_indexing(url, action)
         

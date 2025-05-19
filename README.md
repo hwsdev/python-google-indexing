@@ -7,6 +7,7 @@ A Python tool for submitting URLs to Google's Indexing API with support for mult
 - Submit URLs to Google's Indexing API
 - Process XML sitemaps to automatically extract and add URLs
 - Support for multiple Google API keys
+- Automatic key rotation and quota management
 - Automatic scheduling using cron or built-in scheduler
 - Command-line interface for managing URLs and API keys
 - Detailed logging of successes and errors
@@ -99,6 +100,33 @@ List URLs with a specific status:
 python indexing_cli.py url list --status pending
 ```
 
+### Managing API Keys
+
+Add a new API key:
+```bash
+python indexing_cli.py key add /path/to/your-service-account.json
+```
+
+List all API keys:
+```bash
+python indexing_cli.py key list
+```
+
+Check the status of all API keys (active/inactive):
+```bash
+python indexing_cli.py key status
+```
+
+Reactivate a key that was disabled due to quota limits:
+```bash
+python indexing_cli.py key activate your-key-file.json
+```
+
+Test API keys:
+```bash
+python indexing_cli.py key test
+```
+
 ### Running the Indexing Tool
 
 Run once:
@@ -119,6 +147,22 @@ For more reliable scheduling, you can use cron:
 # Run the indexing tool every hour
 0 * * * * cd /path/to/python-google-indexing && python indexing_scheduler.py --run-once
 ```
+
+## API Key Quota Management
+
+The tool automatically manages API quota limits:
+
+1. **Automatic Detection**: The tool detects when a key has reached its quota limit
+2. **Key Deactivation**: Keys that hit their quota are automatically deactivated
+3. **Key Rotation**: The system will rotate through all active keys, maximizing your indexing capacity
+4. **Key Status**: Use `python indexing_cli.py key status` to see which keys are active or inactive
+5. **Manual Reactivation**: Reset a key's status with `python indexing_cli.py key activate your-key-file.json`
+
+Google enforces the following quota limits:
+- 200 URLs per day per API key
+- 600 URLs per minute per user across all API keys
+
+By using multiple keys, you can significantly increase the number of URLs processed daily.
 
 ## Configuration Options
 
@@ -143,6 +187,7 @@ Logs are stored in the following files:
 ## Troubleshooting
 
 - **No API Clients Loaded**: Ensure you've added a valid service account JSON file
+- **All Keys Inactive**: If all keys are marked as inactive due to quota limits, wait 24 hours or use `key activate`
 - **Sitemap Parsing Errors**: Check that the sitemap URL is valid and accessible
 - **Indexing Failures**: Verify your Search Console and API permissions
 
