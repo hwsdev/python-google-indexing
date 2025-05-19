@@ -14,7 +14,7 @@ A Python tool for submitting URLs to Google's Indexing API with support for mult
 
 1. Clone this repository:
 ```
-git clone https://github.com/yourusername/google-indexing-tool.git
+git clone https://github.com/hwsdev/google-indexing-tool.git
 cd google-indexing-tool
 ```
 
